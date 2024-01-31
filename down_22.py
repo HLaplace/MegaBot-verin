@@ -8,12 +8,13 @@ from scipy.stats import linregress
 import colorama
 from colorama import Fore, Style
 from tool import *
+from filtre import *
 colorama.init(autoreset=True)
 
 def afficher_graphiques(masses, positions, temps, vitesses_moyennes):
     app = QApplication(sys.argv)
     main_window = QMainWindow()
-    main_window.setWindowTitle("Affichage de delta P en m et des vitesses moyennes en descente sur verrin 2.3")  
+    main_window.setWindowTitle("Affichage de delta P en m et des vitesses en descente sur verrin 2.2")  
     central_widget = QWidget()
     main_window.setCentralWidget(central_widget)
     layout = QVBoxLayout(central_widget)
@@ -51,6 +52,7 @@ def afficher_graphiques(masses, positions, temps, vitesses_moyennes):
 
     main_window.show()
     sys.exit(app.exec_())
+
 
 def stat(base, nom_fichier):
     verify = False
@@ -94,16 +96,20 @@ def stat(base, nom_fichier):
 
         acq = int(extraire_numero_acquisition(nom_fichier))
         masse = extraire_poids(nom_fichier)
+        tab_data = filtre(masse, acq)
 
-        f_bas = 20
-        f_haut = 280
+        f_bas = tab_data[2]
+        f_haut = tab_data[3]
+
         intervalle = 20
- 
         f_len = f_haut - f_bas - 1
 
         for i in range (f_bas, f_haut, intervalle):
             position_t.append(positions[i])
             temp_t.append(temps[i])
+            # print(Fore.RED + str(i))
+            # print(Fore.GREEN + str(positions[i]) )
+            # print(Fore.YELLOW + str(temps[i]))
 
         with np.errstate(divide='ignore', invalid='ignore'):# gere le 0 divide error
             vitesses = np.gradient(position_t, temp_t)
@@ -113,8 +119,12 @@ def stat(base, nom_fichier):
         d_p = position_t[m_p]  - position_t[0]
         d_t = temp_t[m_t] - temp_t[0]
         v_moy = d_p / d_t
-
-        print(acq, masse, d_p, d_t, v_moy)
+        print(Fore.GREEN + " " + 
+            str(acq)+ " " + 
+            str(masse)+ " " + 
+            str(d_p)+ " " + 
+            str(d_t)+ " " + 
+            str(v_moy))
         return masse, d_p, d_t, v_moy
 
 ### executions sur plusieurs fichiers ###
@@ -123,7 +133,8 @@ repertoire_specifie = "C:/Archive/ENSEIRB/Controle moteur/data_ACQ_2/"
 tab_donnees = []
 if os.path.exists(repertoire_specifie) and os.path.isdir(repertoire_specifie):
     for nom_fichier in os.listdir(repertoire_specifie):
-        chemin_fichier = os.path.join(repertoire_specifie, nom_fichier)       
+        chemin_fichier = os.path.join(repertoire_specifie, nom_fichier)  
+        print(Fore.RED + nom_fichier)
         t = stat(repertoire_specifie, nom_fichier)
         tab_donnees.append(t)
 else:
@@ -135,4 +146,6 @@ positions = [data[1] for data in tab_donnees]
 temps = [data[2] for data in tab_donnees]
 vitesses_moyennes = [data[3] for data in tab_donnees]
 
+# Appel de la fonction d'affichage avec les données extraites
 afficher_graphiques(masses, positions, temps, vitesses_moyennes)
+
