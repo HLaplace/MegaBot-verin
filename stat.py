@@ -3,36 +3,62 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
 import pyqtgraph as pg
 import numpy as np
 from scipy.ndimage import median_filter
-import re
 import os
-import matplotlib.pyplot as plt
 from scipy.stats import linregress
+import colorama
+from colorama import Fore, Style
+from tool import *
+colorama.init(autoreset=True)
 
-def extraire_poids(chaine):
-    match = re.search(r'(\d+(\.\d+)?)kg', chaine)
-    
-    if match:
-        poids_str = match.group(1)
-        poids_entier = int(float(poids_str))
-        return poids_entier
-    else:
-        print("Aucun poids trouvé dans la chaîne.")
-        return None
+def afficher_graphiques(masses, positions, temps, vitesses_moyennes):
+    app = QApplication(sys.argv)
+    main_window = QMainWindow()
+    main_window.setWindowTitle("Affichage de delta P en m et des vitesses moyennes en descente sur verrin 2.3")  
+    central_widget = QWidget()
+    main_window.setCentralWidget(central_widget)
+    layout = QVBoxLayout(central_widget)
 
-def moyenne(tab):
-    tab_sans_nan = [x for x in tab if not np.isnan(x)]
-    somme = sum(tab_sans_nan)
-    moyenne = somme / len(tab_sans_nan)
-    return moyenne
+    plot_widget_positions = pg.PlotWidget()
+    layout.addWidget(plot_widget_positions)
+    curve_positions = plot_widget_positions.plot(pen='g')
+    plot_widget_positions.plotItem.showGrid(True, True, alpha=0.5)
 
-def stat(nom_fichier):
+    plot_widget_vitesses = pg.PlotWidget()
+    layout.addWidget(plot_widget_vitesses)
+    curve_vitesses = plot_widget_vitesses.plot(pen='b')
+    plot_widget_vitesses.plotItem.showGrid(True, True, alpha=0.5)
+
+    # Affichage des positions
+    positions = [abs(element) for element in positions]
+    plot_widget_positions.plot(masses, positions, pen=None, symbol='o', symbolPen='g', symbolBrush='g')
+
+    # Calcul de la régression linéaire pour les positions
+    positions_regression = np.polyfit(masses, positions, 1)
+    positions_regression_line = np.polyval(positions_regression, masses)
+    plot_widget_positions.plot(masses, positions_regression_line, pen='g')
+
+    # Affichage des vitesses
+    vitesses_moyennes = [abs(element) for element in vitesses_moyennes]
+    plot_widget_vitesses.plot(masses, vitesses_moyennes, pen=None, symbol='o', symbolPen='r', symbolBrush='r')
+
+    # Calcul de la régression linéaire pour les vitesses
+    vitesses_regression = np.polyfit(masses, vitesses_moyennes, 1)
+    vitesses_regression_line = np.polyval(vitesses_regression, masses)
+    plot_widget_vitesses.plot(masses, vitesses_regression_line, pen='r')
+
+    plot_widget_positions.setYRange(0, 0.18)
+    plot_widget_vitesses.setYRange(0, 0.5)
+
+    main_window.show()
+    sys.exit(app.exec_())
+
+def stat(base, nom_fichier):
     verify = False
     counter_values_pos_reel_1 = []
     counter_values_pwm_cible = []
     vit_positive = []
     vit_negative = []
     affichage = False
-    base = "C:/Archive/ENSEIRB/Controle moteur/data_ACQ/"
 
     with open(base + nom_fichier, 'r', encoding="ISO-8859-1") as fichier:
         compteur_lignes = 0
@@ -42,7 +68,7 @@ def stat(nom_fichier):
                 continue
             if ligne.startswith("$SOPE"):
                 continue 
-            ligne_sans_prefixe = ligne.strip().replace("L23#", "")
+            ligne_sans_prefixe = ligne.strip().replace("L22#", "")
             tab_valeurs = ligne_sans_prefixe.split('#')
 
             if len(tab_valeurs) < 5:
@@ -63,86 +89,50 @@ def stat(nom_fichier):
         temps = data_array_values_pos_reel[:, 0]
         positions = data_array_values_pos_reel[:, 1]
 
-        delta_positions = np.diff(positions)
-        delta_temps = np.diff(temps)
+        position_t = []
+        temp_t = [] 
 
-        with np.errstate(divide='ignore', invalid='ignore'):
-            vitesses = np.gradient(positions, temps)
-
-
-        median_value = len(vitesses) * 0.01
-        vitesses_filtre = median_filter(vitesses, size=int(median_value))
-        #print("valeur du filtre :", str(int(median_value)))
-        vit_positive = []
-        vit_negative = []
-
-        for i in range (0 ,len(vitesses_filtre)):
-            if counter_values_pwm_cible[i][1] > 0:
-                vit_positive.append(vitesses_filtre[i])
-            else :
-                vit_negative.append(vitesses_filtre[i])
-
-        moyenn_vitesse_positive = moyenne(vit_positive)
-        moyenne_vitesse_negative = moyenne(vit_negative)
+        acq = int(extraire_numero_acquisition(nom_fichier))
         masse = extraire_poids(nom_fichier)
 
-        if affichage == True:
+        f_bas = 20
+        f_haut = 280
+        intervalle = 20
+ 
+        f_len = f_haut - f_bas - 1
 
-            ### courbe ###
-            app = QApplication(sys.argv)
-            win = QMainWindow()
-            central_widget = QWidget()
-            layout = QVBoxLayout()
-            graphique = pg.PlotWidget()
-            
-            courbe_vitesses_filtre = graphique.plot(temps, vitesses_filtre, pen='g')  # Ajout de la première courbe 
-            courbe_pwm_cible = graphique.plot(temps, [item[1] for item in counter_values_pwm_cible], pen='r')  # Ajout de la deuxième courbe 
+        for i in range (f_bas, f_haut, intervalle):
+            position_t.append(positions[i])
+            temp_t.append(temps[i])
 
-            layout.addWidget(graphique)
-            central_widget.setLayout(layout)
-            win.setCentralWidget(central_widget)
-            win.show()
-            sys.exit(app.exec_())
-        return masse, moyenn_vitesse_positive, moyenne_vitesse_negative
+        with np.errstate(divide='ignore', invalid='ignore'):# gere le 0 divide error
+            vitesses = np.gradient(position_t, temp_t)
 
-### executions sur un fichier ##
-#b = "donnees_serie_23_121kg_12.36V_22.8A_24.3A_acq3_2024-01-12_15-29-07.txt"
-#t = stat(b)
-#print("Pour une masse de ", t[0], "on a une vitesse positive moyenne de :", t[1],
-  #  "m/s et une vitesse moyenne negative de ", t[2], "m/s.")
+        m_p = len(position_t) - 1
+        m_t = len(temp_t) - 1
+        d_p = position_t[m_p]  - position_t[0]
+        d_t = temp_t[m_t] - temp_t[0]
+        v_moy = d_p / d_t
 
-### executions sur plusieurs fichiers ##
+        print(acq, masse, d_p, d_t, v_moy)
+        return masse, d_p, d_t, v_moy
 
-
+### executions sur plusieurs fichiers ###
 # Chemin du répertoire
-repertoire_specifie = "C:/Archive/ENSEIRB/Controle moteur/data_ACQ/"
+repertoire_specifie = "C:/Archive/ENSEIRB/Controle moteur/data_ACQ_2/"
 tab_donnees = []
 if os.path.exists(repertoire_specifie) and os.path.isdir(repertoire_specifie):
     for nom_fichier in os.listdir(repertoire_specifie):
-        chemin_fichier = os.path.join(repertoire_specifie, nom_fichier)
-        print(nom_fichier)
-        t = stat(nom_fichier)
+        chemin_fichier = os.path.join(repertoire_specifie, nom_fichier)       
+        t = stat(repertoire_specifie, nom_fichier)
         tab_donnees.append(t)
-        print("Pour une masse de ", t[0], "on a une vitesse positive moyenne de :", t[1],
-             "m/s et une vitesse moyenne negative de ", t[2], "m/s.")
 else:
     print("Le répertoire spécifié n'existe pas ou n'est pas un répertoire.")
 
-x, y1, y2 = zip(*tab_donnees)
 
-plt.scatter(x, y1, label='vitesse moyenne positive')
-plt.scatter(x, y2, label='vitesse moyenne negative')
+masses = [data[0] for data in tab_donnees]
+positions = [data[1] for data in tab_donnees]
+temps = [data[2] for data in tab_donnees]
+vitesses_moyennes = [data[3] for data in tab_donnees]
 
-coefficients_y1 = np.polyfit(x, y1, 2)
-polynome_deg2_y1 = np.poly1d(coefficients_y1)
-y1_predites = polynome_deg2_y1(x)
-plt.plot(x, y1_predites, label='Régression quadratique (y1)')
-
-coefficients_y2 = np.polyfit(x, y2, 2)
-polynome_deg2_y2 = np.poly1d(coefficients_y2)
-y2_predites = polynome_deg2_y2(x)
-plt.plot(x, y2_predites, label='Régression quadratique (y2)')
-
-plt.legend()
-plt.title('Tracé des vitesses moyennes avec régression quadratique')
-plt.show()
+afficher_graphiques(masses, positions, temps, vitesses_moyennes)
